@@ -1,0 +1,7 @@
+{
+    "onedrive.api.token": "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+    "onedrive.client.id": "",
+    "onedrive.client.secret": "",
+    "onedrive.refresh.token": "",
+    "oneindex.url": ""
+}
