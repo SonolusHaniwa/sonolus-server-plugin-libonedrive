@@ -118,8 +118,8 @@ class PluginOneDrive: public SonolusServerPlugin {
                         return;
                     }
                     auto $_POST = postParam(request); int len;
-                    char* filePointerBeg = base64_decode($_POST["file"], len);
-                    unsigned char* fileSha1 = sha1(filePointerBeg, len);
+                    string filePointerBeg = base64_decode($_POST["file"]);
+                    unsigned char* fileSha1 = sha1(const_cast<char*>(filePointerBeg.c_str()), filePointerBeg.size());
                     stringstream buffer;
                     for (int i = 0; i < 20; i++)
                         buffer << hex << setw(2) << setfill('0') << int(fileSha1[i]);
@@ -157,7 +157,7 @@ class PluginOneDrive: public SonolusServerPlugin {
                             {"Authorization", "Bearer " + token}, 
                             {"Content-Length", to_string(ed - ist)}, 
                             {"Content-Range", "Bytes " + to_string(ist) + "-" + to_string(ed - 1) + "/" + to_string(len)}}, 
-                            string(filePointerBeg + ist, ed - ist));
+                            filePointerBeg.substr(ist, ed - ist));
                     };
 
                     Json::Value res2;
