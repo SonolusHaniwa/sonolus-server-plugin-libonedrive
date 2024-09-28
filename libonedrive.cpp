@@ -70,11 +70,69 @@ string curl_put(string url, vector<pair<string, string> > header, string data) {
         curl_easy_setopt(curl, CURLOPT_VERBOSE, 0);
         curl_easy_setopt(curl, CURLOPT_READFUNCTION, readfunc);
         curl_easy_setopt(curl, CURLOPT_READDATA, (void *)&pd);
+		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, req_reply);
+		curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&response);
         res = curl_easy_perform(curl);
         curl_easy_cleanup(curl);
     }
     return response;
 }
+
+auto onedrive_uploader = [](string content){
+    int len = content.size();
+    string buffer = sha1(content);
+    Json::Value driveConfig; string json = readFile("./plugins/libonedrive/config.json");
+    json_decode(json, driveConfig);
+
+    // 上传大文件
+    const string drive_api = "https://graph.microsoft.com/v1.0/me/drive/root:";
+    const string auth_api = "https://login.microsoftonline.com/common/oauth2/v2.0/token";
+
+    // 获取新token
+    json = curl_post(auth_api, {},
+    "client_id=" + driveConfig["onedrive.client.id"].asString() +
+    "&redirect_uri=http://localhost" + 
+    "&client_secret=" + driveConfig["onedrive.client.secret"].asString() + 
+    "&refresh_token=" + driveConfig["onedrive.refresh.token"].asString() + "&grant_type=refresh_token");
+    Json::Value res; json_decode(json, res);
+    string token = res["access_token"].asString();
+
+    // 获取上传会话
+    json = curl_post(
+        drive_api + "/data/" + buffer + ":/createUploadSession", 
+        {{"Authorization", "Bearer " + token},
+        {"Content-Type", "application/json"}}, 
+        "{\"item\": {\"@microsoft.graph.conflictBehavior\": \"replace\", \"name\": \"" + buffer + "\"}}");
+    json_decode(json, res);
+    string url = res["uploadUrl"].asString();
+
+    // 上传文件
+    int size = 320 * 1024;
+    for (int ist = 0; ist < len; ist += size) {
+        int ed = min(ist + size, len);
+        json = curl_put(url, {
+            {"Authorization", "Bearer " + token}, 
+            {"Content-Length", to_string(ed - ist)}, 
+            {"Content-Range", "Bytes " + to_string(ist) + "-" + to_string(ed - 1) + "/" + to_string(len)}}, 
+            content.substr(ist, ed - ist));
+    };
+
+    writeLog(LOG_LEVEL_INFO, "Upload success: " + buffer + " (" + to_string(content.size()) + " bytes)");
+    return buffer;
+};
+
+#define quickSendMsg2(code, message) { \ 
+    msg[code]["message"] = message; \
+    __api_default_response["Content-Length"] = to_string(json_encode(msg[code]).size()); \
+    putRequest(conn, code, __api_default_response); \
+    send(conn, json_encode(msg[code])); \
+    return; \
+}
+
+#include"web/uploader.h"
+#include"web/data.h"
+#include"web/sonolus/ItemUpload.h"
+#include"web/sonolus/LevelsResultUpload.h"
 
 class PluginOneDrive: public SonolusServerPlugin {
     public:
@@ -109,77 +167,11 @@ class PluginOneDrive: public SonolusServerPlugin {
     void onPluginRouter(int argc, char** argv, application *app) const {
         preload();
         for (int i = 0; i < app->route.size(); i++) {
-            if (app->route[i].path == "/uploader") {
-                app->route[i].main = [](client_conn conn, http_request request, param argv){
-                    if (!checkLogin(request)) {
-                        putRequest(conn, 401, __default_response);
-                        send(conn, json_encode(msg[401]));
-                        close(conn.conn);
-                        return;
-                    }
-                    auto $_POST = postParam(request); int len;
-                    string filePointerBeg = base64_decode($_POST["file"]);
-                    unsigned char* fileSha1 = sha1(const_cast<char*>(filePointerBeg.c_str()), filePointerBeg.size());
-                    stringstream buffer;
-                    for (int i = 0; i < 20; i++)
-                        buffer << hex << setw(2) << setfill('0') << int(fileSha1[i]);
-
-                    Json::Value driveConfig; string json = readFile("./plugins/libonedrive/config.json");
-                    json_decode(json, driveConfig);
-
-                    // 上传大文件
-                    const string drive_api = "https://graph.microsoft.com/v1.0/me/drive/root:";
-                    const string auth_api = "https://login.microsoftonline.com/common/oauth2/v2.0/token";
-
-                    // 获取新token
-                    json = curl_post(auth_api, {},
-                    "client_id=" + driveConfig["onedrive.client.id"].asString() +
-                    "&redirect_uri=http://localhost" + 
-                    "&client_secret=" + driveConfig["onedrive.client.secret"].asString() + 
-                    "&refresh_token=" + driveConfig["onedrive.refresh.token"].asString() + "&grant_type=refresh_token");
-                    Json::Value res; json_decode(json, res);
-                    string token = res["access_token"].asString();
-
-                    // 获取上传会话
-                    json = curl_post(
-                        drive_api + "/data/" + buffer.str() + ":/createUploadSession", 
-                        {{"Authorization", "Bearer " + token},
-                        {"Content-Type", "application/json"}}, 
-                        "{\"item\": {\"@microsoft.graph.conflictBehavior\": \"rename\", \"name\": \"" + buffer.str() + "\"}}");
-                    json_decode(json, res);
-                    string url = res["uploadUrl"].asString();
-
-                    // 上传文件
-                    int size = 320 * 1024;
-                    for (int ist = 0; ist < len; ist += size) {
-                        int ed = min(ist + size, len);
-                        json = curl_put(url, {
-                            {"Authorization", "Bearer " + token}, 
-                            {"Content-Length", to_string(ed - ist)}, 
-                            {"Content-Range", "Bytes " + to_string(ist) + "-" + to_string(ed - 1) + "/" + to_string(len)}}, 
-                            filePointerBeg.substr(ist, ed - ist));
-                    };
-
-                    Json::Value res2;
-                    res2["status"] = "success";
-                    res2["hash"] = buffer.str();
-                    res2["url"] = "/data/" + buffer.str();
-                    putRequest(conn, 200, __api_default_response);
-                    send(conn, json_encode(res2));
-                    close(conn.conn);
-                };
-            }
-            if (app->route[i].path == "/data/%s") {
-                app->route[i].main = [](client_conn conn, http_request request, param argv){
-                    Json::Value driveConfig; string json = readFile("./plugins/libonedrive/config.json");
-                    json_decode(json, driveConfig);
-
-                    auto response = __api_default_response;
-                    response["Location"] = driveConfig["oneindex.url"].asString() + "/data/" + argv[0];
-                    putRequest(conn, 307, response);
-                    close(conn.conn);
-                };
-            }
+            if (app->route[i].path == "/uploader") app->route[i].main = OneDriveUploader;
+            if (app->route[i].path == "/sonolus/%s/upload") app->route[i].main = OneDriveUpload;
+            if (app->route[i].path == "/sonolus/levels/result/upload") app->route[i].main = OneDriveLevelsResultUpload;
+            if (app->route[i].path == "/sonolus/%s/%s/upload") app->route[i].main = OneDriveUpload;
+            if (app->route[i].path == "/data/%s") app->route[i].main = OneDriveData;
         }
     }
 };

@@ -19,4 +19,3 @@ g++ plugins/libonedrive/libonedrive.cpp -o plugins/libonedrive.so -fPIC -shared 
 - `onedrive.client.id`: Azure Application Client ID。获取方法可见 [获取 client_id 和 client_secret](https://ovi.swo.moe/zh/docs/advanced)。
 - `onedrive.client.secret`: Azure Application Client Secret。获取方法可见 [获取 client_id 和 client_secret](https://ovi.swo.moe/zh/docs/advanced)。
 - `onedrive.refresh.token`: OneDrive Refresh Token。具体见 [企业版账户登录](https://learn.microsoft.com/zh-cn/onedrive/developer/rest-api/getting-started/graph-oauth?view=odsp-graph-online) 和 [个人版账户登录](https://learn.microsoft.com/zh-cn/onedrive/developer/rest-api/getting-started/msa-oauth?view=odsp-graph-online)。
-- `oneindex.url`: 你搭建的 `OneIndex` 文件直链获取地址，例如 `https://your.domain.com/api/raw/?path=`。
